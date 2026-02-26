@@ -1,0 +1,5 @@
+{
+  "name": "SBOM Manager Pro",
+  "description": "Professional Software Bill of Materials (SBOM) management platform with deterministic vulnerability analysis and supply chain security auditing.",
+  "requestFramePermissions": []
+}
