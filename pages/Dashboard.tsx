@@ -68,9 +68,9 @@ const Dashboard: React.FC<DashboardProps> = ({ latestScan, userEmail, onNavigate
 
   const stats = {
     totalProjects: history.length,
-    internal: latestScan?.dependencies.filter(d => d.type === 'internal').length || 0,
-    external: latestScan?.dependencies.filter(d => d.type === 'external').length || 0,
-    thirdParty: latestScan?.dependencies.filter(d => d.type === 'third-party').length || 0,
+    internal: latestScan?.internal?.length || 0,
+    external: latestScan?.external?.length || 0,
+    thirdParty: latestScan?.thirdParty?.length || 0,
     highRisk: latestScan?.vulnerabilities.critical || 0,
   };
 

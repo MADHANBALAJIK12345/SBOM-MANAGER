@@ -60,6 +60,9 @@ export interface ScanResult {
     low: number;
   };
   dependencies: Dependency[];
+  internal: Dependency[];
+  external: Dependency[];
+  thirdParty: Dependency[];
   codeErrors: CodeError[];
   metadata: {
     engine: string;

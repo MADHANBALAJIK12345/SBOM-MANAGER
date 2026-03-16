@@ -1,5 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { Send, Trash2, BrainCircuit, Activity, X, ShieldAlert, Loader2 } from 'lucide-react';
 import { getGeminiChatResponse } from '../services/geminiService';
 
@@ -106,13 +107,18 @@ const ChatBot: React.FC<ChatBotProps> = ({ isDarkTheme }) => {
 
   return (
     <div className="fixed bottom-8 right-8 z-[9999] flex flex-col items-end">
-      {isOpen && (
-        <div 
-          ref={chatWindowRef}
-          className={`w-[420px] h-[640px] border rounded-[3rem] shadow-2xl flex flex-col overflow-hidden animate-in zoom-in fade-in slide-in-from-bottom-10 duration-300 mb-6 backdrop-blur-3xl ${
-            isDarkTheme ? 'bg-slate-950/95 border-white/10 ring-1 ring-white/10' : 'bg-white/98 border-slate-200 shadow-slate-200/50'
-          }`}
-        >
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div 
+            ref={chatWindowRef}
+            initial={{ opacity: 0, y: 20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.95 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
+            className={`w-[420px] h-[640px] border rounded-[3rem] shadow-2xl flex flex-col overflow-hidden mb-6 backdrop-blur-3xl ${
+              isDarkTheme ? 'bg-slate-950/95 border-white/10 ring-1 ring-white/10' : 'bg-white/98 border-slate-200 shadow-slate-200/50'
+            }`}
+          >
           {/* Header */}
           <div className={`p-8 border-b flex justify-between items-center ${isDarkTheme ? 'border-white/5 bg-black/20' : 'border-slate-100 bg-slate-50'}`}>
             <div className="flex items-center gap-4">
@@ -216,8 +222,9 @@ const ChatBot: React.FC<ChatBotProps> = ({ isDarkTheme }) => {
                </button>
              </form>
           </div>
-        </div>
+        </motion.div>
       )}
+    </AnimatePresence>
 
       {/* Trigger Button */}
       <button

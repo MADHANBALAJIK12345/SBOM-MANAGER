@@ -202,6 +202,9 @@ export const analyzeFiles = async (files: File[]): Promise<ScanResult> => {
     timestamp,
     vulnerabilities,
     dependencies,
+    internal: dependencies.filter(d => d.type === 'internal'),
+    external: dependencies.filter(d => d.type === 'external'),
+    thirdParty: dependencies.filter(d => d.type === 'third-party'),
     codeErrors,
     metadata: {
       engine: 'SBOM_DETERMINISTIC_V7',

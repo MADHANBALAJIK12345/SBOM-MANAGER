@@ -23,11 +23,12 @@ const SbomResult: React.FC<SbomResultProps> = ({ scanResult, user, t }) => {
 
   useEffect(() => {
     if (scanResult) {
-      const hasInternal = scanResult.dependencies.some(d => d.type === 'internal');
+      console.log('ScanResult loaded in SbomResult:', scanResult.id);
+      const hasInternal = (scanResult.internal?.length || 0) > 0;
       if (!hasInternal) {
-        const hasThirdParty = scanResult.dependencies.some(d => d.type === 'third-party');
+        const hasThirdParty = (scanResult.thirdParty?.length || 0) > 0;
         if (hasThirdParty) setActiveTab('third-party');
-        else if (scanResult.dependencies.some(d => d.type === 'external')) setActiveTab('external');
+        else if ((scanResult.external?.length || 0) > 0) setActiveTab('external');
       }
     }
   }, [scanResult?.id]);
@@ -118,15 +119,21 @@ const SbomResult: React.FC<SbomResultProps> = ({ scanResult, user, t }) => {
     doc.setFontSize(18);
     doc.text('EXECUTIVE SUMMARY', 15, 20);
     
+    const internalCount = scanResult.internal?.length || 0;
+    const externalCount = scanResult.external?.length || 0;
+    const thirdPartyCount = scanResult.thirdParty?.length || 0;
+    const totalDeps = internalCount + externalCount + thirdPartyCount;
+
     doc.autoTable({
       startY: 30,
       head: [['Metric Identifier', 'Analysis Result']],
       body: [
-        ['Total Mapped Dependencies', scanResult.dependencies.length],
+        ['Total Mapped Dependencies', totalDeps],
         ['Critical Vulnerabilities', scanResult.vulnerabilities.critical],
         ['High Risk Findings', scanResult.vulnerabilities.high],
-        ['Internal Proprietary Nodes', scanResult.dependencies.filter(d => d.type === 'internal').length],
-        ['Third-Party Packages', scanResult.dependencies.filter(d => d.type === 'third-party').length],
+        ['Internal Proprietary Nodes', internalCount],
+        ['External NPM Packages', externalCount],
+        ['Third-Party CDN Libraries', thirdPartyCount],
         ['Analysis Engine', scanResult.metadata.engine]
       ],
       theme: 'grid',
@@ -135,13 +142,26 @@ const SbomResult: React.FC<SbomResultProps> = ({ scanResult, user, t }) => {
 
     doc.addPage();
     doc.text('DEPENDENCY INVENTORY', 15, 20);
-    doc.autoTable({
-      startY: 30,
-      head: [['Component', 'Version', 'Type', 'License', 'Risk Status']],
-      body: scanResult.dependencies.map(d => [d.name, d.version, d.type, d.license, d.risk]),
-      theme: 'striped',
-      headStyles: { fillColor: [30, 41, 59] }
-    });
+    
+    const allDeps = [
+      ...(scanResult.internal || []).map(d => ({ ...d, type: 'Internal' })),
+      ...(scanResult.external || []).map(d => ({ ...d, type: 'External' })),
+      ...(scanResult.thirdParty || []).map(d => ({ ...d, type: 'Third-Party' }))
+    ];
+
+    if (allDeps.length === 0) {
+      doc.setFontSize(12);
+      doc.setTextColor(100, 116, 139);
+      doc.text('No dependencies recorded in this audit.', 15, 40);
+    } else {
+      doc.autoTable({
+        startY: 30,
+        head: [['Component', 'Version', 'Type', 'License', 'Risk Status']],
+        body: allDeps.map(d => [d.name, d.version, d.type, d.license, d.risk]),
+        theme: 'striped',
+        headStyles: { fillColor: [30, 41, 59] }
+      });
+    }
 
     doc.save(`${scanResult.projectName}_Professional_SBOM.pdf`);
     setIsExporting(false);
@@ -163,9 +183,18 @@ const SbomResult: React.FC<SbomResultProps> = ({ scanResult, user, t }) => {
     a.click();
   };
 
-  const filteredDeps = scanResult.dependencies.filter(d => 
-    d.type === activeTab && d.name.toLowerCase().includes(search.toLowerCase())
-  );
+  const filteredDeps = (() => {
+    console.log(`Filtering dependencies for tab: ${activeTab}`);
+    if (!scanResult) return [];
+    
+    let deps: Dependency[] = [];
+    if (activeTab === 'internal') deps = scanResult.internal || [];
+    else if (activeTab === 'external') deps = scanResult.external || [];
+    else if (activeTab === 'third-party') deps = scanResult.thirdParty || [];
+    
+    console.log(`Found ${deps.length} entries in ${activeTab}`);
+    return deps.filter(d => d.name.toLowerCase().includes(search.toLowerCase()));
+  })();
 
   const filteredErrors = scanResult.codeErrors.filter(e => 
     e.filePath.toLowerCase().includes(search.toLowerCase())
@@ -253,11 +282,11 @@ const SbomResult: React.FC<SbomResultProps> = ({ scanResult, user, t }) => {
                 </thead>
                 <tbody className="divide-y divide-[var(--border)]">
                   {filteredDeps.length === 0 ? (
-                    <tr><td colSpan={5} className="p-20 text-center opacity-30 text-xs font-mono">No entries recorded in this category.</td></tr>
+                    <tr><td colSpan={5} className="p-20 text-center opacity-30 text-xs font-mono">No modules found in this category.</td></tr>
                   ) : filteredDeps.map(dep => (
                     <tr key={dep.id} className="hover:bg-emerald-500/5 group transition-colors">
                       <td className="p-6 font-bold text-sm text-[var(--text-main)]">{dep.name}</td>
-                      <td className="p-6 text-xs font-mono text-[var(--text-muted)]">v{dep.version}</td>
+                      <td className="p-6 text-xs font-mono text-[var(--text-muted)]">{dep.version === 'remote' ? 'REMOTE' : `v${dep.version}`}</td>
                       <td className="p-6 text-xs font-bold text-blue-500 uppercase">{dep.license}</td>
                       <td className="p-6"><RiskBadge risk={dep.risk} /></td>
                       <td className="p-6 text-right">
