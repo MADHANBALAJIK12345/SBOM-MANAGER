@@ -5,8 +5,10 @@ import { Search, ExternalLink, Activity, CheckCircle, ShieldAlert, Layers, Packa
 import { ScanResult, RiskLevel, Dependency, CodeError, FileRecord, UserProfile } from '../types';
 import { storageService } from '../services/storageService';
 import { transformToCycloneDX, transformToSPDX, transformToALS } from '../services/sbomExportService';
+import SecurityScore from '../components/SecurityScore';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
+import * as d3 from 'd3';
 
 interface SbomResultProps {
   scanResult: ScanResult | null;
@@ -14,12 +16,173 @@ interface SbomResultProps {
   t: (key: any) => string;
 }
 
-const SbomResult: React.FC<SbomResultProps> = ({ scanResult, user, t }) => {
-  const [activeTab, setActiveTab] = useState<'internal' | 'external' | 'third-party' | 'code' | 'vault'>('internal');
+const DependencyGraph: React.FC<{ data: any }> = ({ data }) => {
+  const svgRef = React.useRef<SVGSVGElement>(null);
+
+  React.useEffect(() => {
+    if (!data || !svgRef.current) return;
+
+    const width = 800;
+    const height = 500;
+    const svg = d3.select(svgRef.current);
+    svg.selectAll('*').remove();
+
+    const root = d3.hierarchy(data);
+    const treeLayout = d3.tree().size([height - 100, width - 200]);
+    treeLayout(root);
+
+    const g = svg.append('g').attr('transform', 'translate(100, 50)');
+
+    // Links
+    g.selectAll('.link')
+      .data(root.links())
+      .enter()
+      .append('path')
+      .attr('class', 'link')
+      .attr('d', d3.linkHorizontal()
+        .x((d: any) => d.y)
+        .y((d: any) => d.x) as any)
+      .attr('fill', 'none')
+      .attr('stroke', 'rgba(16, 185, 129, 0.2)')
+      .attr('stroke-width', 2);
+
+    // Nodes
+    const nodes = g.selectAll('.node')
+      .data(root.descendants())
+      .enter()
+      .append('g')
+      .attr('class', 'node')
+      .attr('transform', (d: any) => `translate(${d.y},${d.x})`);
+
+    nodes.append('circle')
+      .attr('r', 6)
+      .attr('fill', (d: any) => d.data.type === 'internal' ? '#10b981' : '#3b82f6')
+      .attr('stroke', '#fff')
+      .attr('stroke-width', 2);
+
+    nodes.append('text')
+      .attr('dy', '.35em')
+      .attr('x', (d: any) => d.children ? -12 : 12)
+      .attr('text-anchor', (d: any) => d.children ? 'end' : 'start')
+      .text((d: any) => d.data.name)
+      .attr('font-size', '10px')
+      .attr('font-weight', 'bold')
+      .attr('fill', '#94a3b8')
+      .attr('font-family', 'monospace');
+
+  }, [data]);
+
+  return (
+    <div className="w-full h-full overflow-auto flex items-center justify-center">
+      <svg ref={svgRef} width="800" height="500" viewBox="0 0 800 500" />
+    </div>
+  );
+};
+
+const AISuggestionCard: React.FC<{ suggestion: any, onApply: (id: string) => void }> = ({ suggestion, onApply }) => (
+  <div className="glass p-8 rounded-[2.5rem] border-l-4 border-l-emerald-500 shadow-lg">
+    <div className="flex items-start gap-6">
+      <div className="p-4 bg-emerald-500/10 rounded-2xl">
+        <Zap className="text-emerald-500" size={24} />
+      </div>
+      <div className="flex-1 space-y-4">
+        <div className="flex justify-between items-start">
+          <div>
+            <h4 className="text-lg font-black uppercase italic tracking-tight">{suggestion.dependencyName}</h4>
+            <p className="text-xs font-mono text-[var(--text-muted)] mt-1">Current: {suggestion.currentVersion} → Suggested: <span className="text-emerald-500 font-bold">{suggestion.suggestedVersion}</span></p>
+          </div>
+          <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase border ${suggestion.riskLevel === 'Critical' ? 'text-rose-500 border-rose-500/20' : 'text-amber-500 border-amber-500/20'}`}>{suggestion.riskLevel}</span>
+        </div>
+        <p className="text-sm text-[var(--text-muted)] leading-relaxed">{suggestion.reason}</p>
+        <div className="flex gap-4">
+          <button 
+            onClick={() => onApply(suggestion.id)}
+            className="px-6 py-2 bg-emerald-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-500 transition-all"
+          >
+            Apply Fix
+          </button>
+          <button className="px-6 py-2 bg-white/5 text-[var(--text-muted)] rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-white/10 transition-all">Ignore</button>
+        </div>
+      </div>
+    </div>
+  </div>
+);
+
+const LicenseWarningCard: React.FC<{ warning: any }> = ({ warning }) => (
+  <div className="glass p-8 rounded-[2.5rem] border-l-4 border-l-amber-500 shadow-lg">
+    <div className="flex items-start gap-6">
+      <div className="p-4 bg-amber-500/10 rounded-2xl">
+        <CheckCircle className="text-amber-500" size={24} />
+      </div>
+      <div className="flex-1">
+        <div className="flex justify-between items-start mb-2">
+          <h4 className="text-lg font-black uppercase italic tracking-tight">{warning.dependencyName}</h4>
+          <span className="px-3 py-1 bg-amber-500/10 text-amber-500 border border-amber-500/20 rounded-full text-[9px] font-black uppercase">{warning.license}</span>
+        </div>
+        <p className="text-sm text-[var(--text-muted)] font-medium">{warning.message}</p>
+      </div>
+    </div>
+  </div>
+);
+
+const RiskPredictionCard: React.FC<{ prediction: any }> = ({ prediction }) => (
+  <div className="glass p-8 rounded-[2.5rem] border-[var(--border)] shadow-sm">
+    <div className="flex items-center justify-between mb-6">
+      <h4 className="text-sm font-black uppercase tracking-widest text-[var(--text-main)]">{prediction.dependencyName}</h4>
+      <div className={`px-3 py-1 rounded-full text-[9px] font-black uppercase ${prediction.updateFrequency === 'High' ? 'bg-orange-500/10 text-orange-500' : 'bg-emerald-500/10 text-emerald-500'}`}>
+        {prediction.updateFrequency} Frequency
+      </div>
+    </div>
+    <div className="space-y-4">
+      <div className="flex justify-between text-[10px] font-mono text-[var(--text-muted)] uppercase">
+        <span>Stability Score</span>
+        <span>{prediction.predictionScore}%</span>
+      </div>
+      <div className="w-full h-2 bg-white/5 rounded-full overflow-hidden">
+        <motion.div 
+          initial={{ width: 0 }}
+          animate={{ width: `${prediction.predictionScore}%` }}
+          className={`h-full ${prediction.predictionScore < 50 ? 'bg-rose-500' : 'bg-emerald-500'}`}
+        />
+      </div>
+      <p className="text-xs text-[var(--text-muted)] italic leading-relaxed">{prediction.message}</p>
+    </div>
+  </div>
+);
+
+const SbomResult: React.FC<SbomResultProps> = ({ scanResult: initialScanResult, user, t }) => {
+  const [scanResult, setScanResult] = useState<ScanResult | null>(initialScanResult);
+  const [activeTab, setActiveTab] = useState<'internal' | 'external' | 'third-party' | 'code' | 'vault' | 'graph' | 'ai' | 'compliance' | 'risk'>('internal');
   const [search, setSearch] = useState('');
   const [vaultFiles, setVaultFiles] = useState<FileRecord[]>([]);
   const [isExporting, setIsExporting] = useState(false);
   const [selectedDep, setSelectedDep] = useState<Dependency | null>(null);
+
+  useEffect(() => {
+    setScanResult(initialScanResult);
+  }, [initialScanResult]);
+
+  const handleApplyFix = (id: string) => {
+    if (!scanResult) return;
+    const suggestion = scanResult.aiSuggestions?.find(s => s.id === id);
+    if (!suggestion) return;
+
+    const updatedThirdParty = scanResult.thirdParty.map(dep => {
+      if (dep.name === suggestion.dependencyName) {
+        return { ...dep, version: suggestion.suggestedVersion, riskLevel: 'Stable' as RiskLevel };
+      }
+      return dep;
+    });
+
+    const updatedSuggestions = scanResult.aiSuggestions?.filter(s => s.id !== id);
+
+    setScanResult({
+      ...scanResult,
+      thirdParty: updatedThirdParty,
+      aiSuggestions: updatedSuggestions,
+      securityScore: Math.min(100, scanResult.securityScore + 5)
+    });
+  };
 
   useEffect(() => {
     if (scanResult) {
@@ -57,14 +220,14 @@ const SbomResult: React.FC<SbomResultProps> = ({ scanResult, user, t }) => {
     );
   }
 
-  const generateProfessionalPdf = async () => {
-    if (!scanResult || !user) return;
-    setIsExporting(true);
+  const generatePdfBlob = async (): Promise<Blob> => {
+    if (!scanResult || !user) throw new Error('Missing scan result or user profile');
 
     const doc = new jsPDF('p', 'mm', 'a4') as any;
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
     
+    // --- COVER PAGE ---
     doc.setFillColor(15, 23, 42); 
     doc.rect(0, 0, pageWidth, pageHeight, 'F');
     doc.setDrawColor(16, 185, 129);
@@ -108,63 +271,175 @@ const SbomResult: React.FC<SbomResultProps> = ({ scanResult, user, t }) => {
     drawDetail('Register Number', user.registerNumber || 'PRO-2025-001');
     drawDetail('Department', user.department || 'Cyber Security');
     drawDetail('Project ID', scanResult.projectName);
-    drawDetail('Timestamp', new Date().toLocaleString());
+    drawDetail('Security Score', `${scanResult.securityScore}/100`);
 
     doc.setFontSize(10);
     doc.setTextColor(100, 116, 139);
-    doc.text('CONFIDENTIAL SECURITY DOCUMENT - GENERATED VIA SBOM MANAGER PRO', pageWidth / 2, pageHeight - 15, { align: 'center' });
+    doc.text('CONFIDENTIAL SECURITY DOCUMENT - GENERATED VIA SBOM V3 SYSTEM', pageWidth / 2, pageHeight - 15, { align: 'center' });
 
+    // --- EXECUTIVE SUMMARY ---
     doc.addPage();
     doc.setTextColor(15, 23, 42);
-    doc.setFontSize(18);
-    doc.text('EXECUTIVE SUMMARY', 15, 20);
+    doc.setFontSize(22);
+    doc.setFont('helvetica', 'bold');
+    doc.text('1. Executive Summary', 15, 25);
     
-    const internalCount = scanResult.internal?.length || 0;
-    const externalCount = scanResult.external?.length || 0;
-    const thirdPartyCount = scanResult.thirdParty?.length || 0;
-    const totalDeps = internalCount + externalCount + thirdPartyCount;
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'normal');
+    const summaryText = `This report provides a detailed Software Bill of Materials (SBOM) and security analysis for the project "${scanResult.projectName}". The analysis engine identified ${scanResult.internal.length} internal modules, ${scanResult.external.length} external modules, and ${scanResult.thirdParty.length} third-party libraries. A total of ${scanResult.codeErrors.length} security findings were detected. The overall security score is ${scanResult.securityScore}/100, indicating a ${scanResult.securityScore > 80 ? 'Low' : scanResult.securityScore > 50 ? 'Medium' : 'High'} risk profile.`;
+    doc.text(doc.splitTextToSize(summaryText, pageWidth - 30), 15, 35);
 
     doc.autoTable({
-      startY: 30,
+      startY: 55,
       head: [['Metric Identifier', 'Analysis Result']],
       body: [
-        ['Total Mapped Dependencies', totalDeps],
+        ['Security Score', `${scanResult.securityScore}/100`],
+        ['Internal Modules', scanResult.internal.length],
+        ['External Modules', scanResult.external.length],
+        ['Third-Party Libraries', scanResult.thirdParty.length],
+        ['Security Findings', scanResult.codeErrors.length],
         ['Critical Vulnerabilities', scanResult.vulnerabilities.critical],
         ['High Risk Findings', scanResult.vulnerabilities.high],
-        ['Internal Proprietary Nodes', internalCount],
-        ['External NPM Packages', externalCount],
-        ['Third-Party CDN Libraries', thirdPartyCount],
         ['Analysis Engine', scanResult.metadata.engine]
       ],
       theme: 'grid',
       headStyles: { fillColor: [16, 185, 129] }
     });
 
+    // --- MODULE INVENTORIES ---
     doc.addPage();
-    doc.text('DEPENDENCY INVENTORY', 15, 20);
-    
-    const allDeps = [
-      ...(scanResult.internal || []).map(d => ({ ...d, type: 'Internal' })),
-      ...(scanResult.external || []).map(d => ({ ...d, type: 'External' })),
-      ...(scanResult.thirdParty || []).map(d => ({ ...d, type: 'Third-Party' }))
-    ];
+    doc.setFontSize(22);
+    doc.setFont('helvetica', 'bold');
+    doc.text('2. Module Inventories', 15, 25);
 
-    if (allDeps.length === 0) {
-      doc.setFontSize(12);
-      doc.setTextColor(100, 116, 139);
-      doc.text('No dependencies recorded in this audit.', 15, 40);
-    } else {
+    doc.setFontSize(14);
+    doc.text('2.1 Internal Modules', 15, 35);
+    if (scanResult.internal.length > 0) {
       doc.autoTable({
-        startY: 30,
-        head: [['Component', 'Version', 'Type', 'License', 'Risk Status']],
-        body: allDeps.map(d => [d.name, d.version, d.type, d.license, d.risk]),
+        startY: 40,
+        head: [['Name', 'Version', 'Risk', 'License', 'Reason']],
+        body: scanResult.internal.map(m => [m.name, m.version, m.risk, m.license, m.reason]),
         theme: 'striped',
         headStyles: { fillColor: [30, 41, 59] }
       });
+    } else {
+      doc.setFontSize(10);
+      doc.text('No internal modules found.', 15, 40);
+      doc.lastAutoTable = { finalY: 45 };
     }
 
-    doc.save(`${scanResult.projectName}_Professional_SBOM.pdf`);
-    setIsExporting(false);
+    doc.setFontSize(14);
+    doc.text('2.2 External Modules', 15, doc.lastAutoTable.finalY + 15);
+    if (scanResult.external.length > 0) {
+      doc.autoTable({
+        startY: doc.lastAutoTable.finalY + 20,
+        head: [['Name', 'Version', 'Risk', 'License', 'Reason']],
+        body: scanResult.external.map(m => [m.name, m.version, m.risk, m.license, m.reason]),
+        theme: 'striped',
+        headStyles: { fillColor: [30, 41, 59] }
+      });
+    } else {
+      doc.setFontSize(10);
+      doc.text('No external modules found.', 15, doc.lastAutoTable.finalY + 20);
+      doc.lastAutoTable = { finalY: doc.lastAutoTable.finalY + 25 };
+    }
+
+    doc.addPage();
+    doc.setFontSize(14);
+    doc.text('2.3 Third-Party Libraries', 15, 25);
+    if (scanResult.thirdParty.length > 0) {
+      doc.autoTable({
+        startY: 30,
+        head: [['Name', 'Version', 'Risk', 'License', 'Reason']],
+        body: scanResult.thirdParty.map(m => [m.name, m.version, m.risk, m.license, m.reason]),
+        theme: 'striped',
+        headStyles: { fillColor: [30, 41, 59] }
+      });
+    } else {
+      doc.setFontSize(10);
+      doc.text('No third-party libraries found.', 15, 30);
+      doc.lastAutoTable = { finalY: 35 };
+    }
+
+    // --- AI FIX SUGGESTIONS ---
+    doc.addPage();
+    doc.setFontSize(22);
+    doc.setFont('helvetica', 'bold');
+    doc.text('3. AI Fix Suggestions', 15, 25);
+
+    if (scanResult.aiSuggestions && scanResult.aiSuggestions.length > 0) {
+      doc.autoTable({
+        startY: 35,
+        head: [['Dependency', 'Current', 'Suggested', 'Severity', 'Action', 'Reason']],
+        body: scanResult.aiSuggestions.map(s => [s.dependencyName, s.currentVersion, s.suggestedVersion, s.severity, s.action, s.reason]),
+        theme: 'grid',
+        headStyles: { fillColor: [16, 185, 129] }
+      });
+    } else {
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'normal');
+      doc.text('No AI fix suggestions available.', 15, 35);
+      doc.lastAutoTable = { finalY: 40 };
+    }
+
+    // --- SECURITY FINDINGS ---
+    doc.addPage();
+    doc.setFontSize(22);
+    doc.setFont('helvetica', 'bold');
+    doc.text('4. Security Findings', 15, 25);
+
+    if (scanResult.codeErrors.length > 0) {
+      doc.autoTable({
+        startY: 35,
+        head: [['Type', 'File', 'Severity', 'Impact', 'Suggested Fix']],
+        body: scanResult.codeErrors.map(e => [e.errorType, e.filePath, e.severity, e.impact, e.suggestedFix]),
+        theme: 'grid',
+        headStyles: { fillColor: [220, 38, 38] }
+      });
+    } else {
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'normal');
+      doc.text('No security findings detected in the analyzed codebase.', 15, 35);
+      doc.lastAutoTable = { finalY: 40 };
+    }
+
+    // --- RECOMMENDATIONS ---
+    const finalY = doc.lastAutoTable ? doc.lastAutoTable.finalY : 40;
+    doc.setFontSize(22);
+    doc.setFont('helvetica', 'bold');
+    doc.text('5. Recommendations', 15, finalY + 20);
+    
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'normal');
+    const recommendations = [
+      '1. Remove all hardcoded secrets and API keys from the source code immediately.',
+      '2. Use environment variables or a secure secret management service (e.g., AWS Secrets Manager).',
+      '3. Update all third-party libraries to their latest stable versions to mitigate known vulnerabilities.',
+      '4. Implement automated SBOM scanning in your CI/CD pipeline for continuous security monitoring.',
+      '5. Conduct a thorough manual code review of modules flagged with High or Critical risk.'
+    ];
+    recommendations.forEach((rec, i) => {
+      doc.text(rec, 15, finalY + 30 + (i * 8));
+    });
+
+    return doc.output('blob');
+  };
+
+  const generateProfessionalPdf = async () => {
+    try {
+      setIsExporting(true);
+      const blob = await generatePdfBlob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${scanResult.projectName}_Professional_SBOM.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('PDF Generation Error:', error);
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const exportStandard = (format: 'cyclonedx' | 'spdx' | 'als') => {
@@ -181,6 +456,7 @@ const SbomResult: React.FC<SbomResultProps> = ({ scanResult, user, t }) => {
     a.href = url;
     a.download = `${scanResult.projectName}_${format.toUpperCase()}.json`;
     a.click();
+    URL.revokeObjectURL(url);
   };
 
   const filteredDeps = (() => {
@@ -210,6 +486,12 @@ const SbomResult: React.FC<SbomResultProps> = ({ scanResult, user, t }) => {
         <div>
           <h1 className="text-6xl font-black tracking-tighter uppercase italic text-[var(--text-main)]">{t('security_output')}</h1>
           <p className="text-xs font-bold text-[var(--text-muted)] mt-2 uppercase tracking-widest">{scanResult.projectName}</p>
+          {scanResult.metadata.repoInfo && (
+            <div className="flex items-center gap-2 mt-2 text-[10px] font-mono text-emerald-500 font-bold uppercase">
+              <Globe size={12} />
+              <span>{scanResult.metadata.repoInfo.owner} / {scanResult.metadata.repoInfo.name} ({scanResult.metadata.repoInfo.branch})</span>
+            </div>
+          )}
         </div>
         <div className="flex flex-wrap gap-4">
           <ExportBtn 
@@ -225,12 +507,20 @@ const SbomResult: React.FC<SbomResultProps> = ({ scanResult, user, t }) => {
         </div>
       </header>
 
+      <div className="grid grid-cols-1 gap-8">
+        <SecurityScore score={scanResult.securityScore} />
+      </div>
+
       <div className="flex flex-col md:flex-row gap-6 items-center justify-between border-b border-[var(--border)] pb-6">
         <div className="flex flex-wrap gap-2 p-1 bg-[var(--border)] rounded-[2.5rem] w-fit">
           <TabBtn id="internal" active={activeTab === 'internal'} icon={Layers} label="Internal" onClick={setActiveTab} />
           <TabBtn id="third-party" active={activeTab === 'third-party'} icon={Package} label="Third-Party" onClick={setActiveTab} />
           <TabBtn id="external" active={activeTab === 'external'} icon={Globe} label="External" onClick={setActiveTab} />
           <TabBtn id="code" active={activeTab === 'code'} icon={ShieldCheck} label="Findings" onClick={setActiveTab} />
+          <TabBtn id="graph" active={activeTab === 'graph'} icon={Activity} label="Graph" onClick={setActiveTab} />
+          <TabBtn id="ai" active={activeTab === 'ai'} icon={Zap} label="AI Fixes" onClick={setActiveTab} />
+          <TabBtn id="compliance" active={activeTab === 'compliance'} icon={CheckCircle} label="Compliance" onClick={setActiveTab} />
+          <TabBtn id="risk" active={activeTab === 'risk'} icon={ShieldAlert} label="Risks" onClick={setActiveTab} />
           <TabBtn id="vault" active={activeTab === 'vault'} icon={Server} label="Vault" onClick={setActiveTab} />
         </div>
         <div className="relative w-full md:w-80">
@@ -260,6 +550,38 @@ const SbomResult: React.FC<SbomResultProps> = ({ scanResult, user, t }) => {
                 <CodeErrorCard key={err.id} error={err} />
               ))}
             </div>
+          ) : activeTab === 'ai' ? (
+            <div className="space-y-6">
+              {scanResult.aiSuggestions?.length === 0 ? (
+                <div className="p-20 text-center opacity-30 text-xs font-mono">No AI suggestions available.</div>
+              ) : scanResult.aiSuggestions?.map(sug => (
+                <AISuggestionCard key={sug.id} suggestion={sug} onApply={handleApplyFix} />
+              ))}
+            </div>
+          ) : activeTab === 'compliance' ? (
+            <div className="space-y-6">
+              {scanResult.licenseWarnings?.length === 0 ? (
+                <div className="p-20 text-center opacity-30 text-xs font-mono">No license compliance issues detected.</div>
+              ) : scanResult.licenseWarnings?.map(warn => (
+                <LicenseWarningCard key={warn.id} warning={warn} />
+              ))}
+            </div>
+          ) : activeTab === 'risk' ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {scanResult.riskPredictions?.length === 0 ? (
+                <div className="col-span-2 p-20 text-center opacity-30 text-xs font-mono">No risk predictions available.</div>
+              ) : scanResult.riskPredictions?.map((risk, idx) => (
+                <RiskPredictionCard key={idx} prediction={risk} />
+              ))}
+            </div>
+          ) : activeTab === 'graph' ? (
+            <div className="glass rounded-[3rem] p-10 h-[600px] flex flex-col items-center justify-center border-[var(--border)]">
+              <div className="text-center mb-8">
+                <h3 className="text-2xl font-black uppercase tracking-tighter italic">Dependency Tree Visualization</h3>
+                <p className="text-xs text-[var(--text-muted)] font-mono mt-2">Interactive D3.js powered graph of your supply chain</p>
+              </div>
+              <DependencyGraph data={scanResult.dependencyGraph} />
+            </div>
           ) : activeTab === 'vault' ? (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {filteredVault.length === 0 ? (
@@ -282,7 +604,7 @@ const SbomResult: React.FC<SbomResultProps> = ({ scanResult, user, t }) => {
                 </thead>
                 <tbody className="divide-y divide-[var(--border)]">
                   {filteredDeps.length === 0 ? (
-                    <tr><td colSpan={5} className="p-20 text-center opacity-30 text-xs font-mono">No modules found in this category.</td></tr>
+                    <tr><td colSpan={5} className="p-20 text-center opacity-30 text-xs font-mono">No data found</td></tr>
                   ) : filteredDeps.map(dep => (
                     <tr key={dep.id} className="hover:bg-emerald-500/5 group transition-colors">
                       <td className="p-6 font-bold text-sm text-[var(--text-main)]">{dep.name}</td>

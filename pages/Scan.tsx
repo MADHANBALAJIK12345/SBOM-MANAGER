@@ -1,10 +1,9 @@
 
 import React, { useState, useRef } from 'react';
 import { motion } from 'motion/react';
-import { Upload, Folder, FileArchive, X, ShieldCheck, Database, Loader2, FileText, Server } from 'lucide-react';
+import { Upload, Folder, FileArchive, X, ShieldCheck, Database, Loader2, FileText, Server, Github, Link as LinkIcon } from 'lucide-react';
 import { Toast } from '../components/NotificationSystem';
 import { ScanResult } from '../types';
-import { analyzeFiles } from '../services/analyzerService';
 
 interface ScanProps {
   onScanComplete: (result: ScanResult, files: File[]) => void;
@@ -14,8 +13,10 @@ interface ScanProps {
 
 const Scan: React.FC<ScanProps> = ({ onScanComplete, addToast, t }) => {
   const [selectedItems, setSelectedItems] = useState<File[]>([]);
+  const [githubUrl, setGithubUrl] = useState('');
   const [isScanning, setIsScanning] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [status, setStatus] = useState('Ready for Audit');
   const [dbStatus, setDbStatus] = useState<'IDLE' | 'INGESTING' | 'SYNCED'>('IDLE');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -25,6 +26,7 @@ const Scan: React.FC<ScanProps> = ({ onScanComplete, addToast, t }) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
     setSelectedItems(prev => [...prev, ...files]);
+    setGithubUrl(''); // Clear GitHub URL if files are selected
     addToast({
       title: t('payload_staged'),
       message: `${files.length} items added to analysis queue.`,
@@ -33,61 +35,98 @@ const Scan: React.FC<ScanProps> = ({ onScanComplete, addToast, t }) => {
   };
 
   const startScan = async () => {
-    if (selectedItems.length === 0) return;
+    if (selectedItems.length === 0 && !githubUrl) return;
+    
     setIsScanning(true);
     setDbStatus('INGESTING');
     setProgress(0);
+    setStatus(githubUrl ? 'Fetching GitHub Repository...' : 'Initializing Scan Engine...');
 
     console.log('--- FRONTEND SCAN START ---');
-    console.log(`Staging ${selectedItems.length} files for backend audit.`);
-
-    const formData = new FormData();
-    selectedItems.forEach(file => {
-      formData.append('files', file);
-    });
-
+    
     // Mock progress while actual deterministic analysis happens
     const interval = setInterval(() => {
-      setProgress(prev => Math.min(prev + 5, 95));
-    }, 100);
+      setProgress(prev => {
+        if (prev >= 95) return 95;
+        const step = Math.random() * 10;
+        if (githubUrl) {
+          if (prev < 30) setStatus('Connecting to GitHub API...');
+          else if (prev < 50) setStatus('Downloading Repository Payload...');
+          else if (prev < 70) setStatus('Extracting Artifacts...');
+          else if (prev < 85) setStatus('Analyzing Dependency Manifests...');
+          else setStatus('Finalizing SBOM Report...');
+        } else {
+          if (prev < 30) setStatus('Initializing Scan Engine...');
+          else if (prev < 60) setStatus('Parsing Dependency Manifests...');
+          else if (prev < 85) setStatus('Analyzing Source Code for Secrets...');
+          else setStatus('Finalizing SBOM Report...');
+        }
+        return Math.floor(prev + step);
+      });
+    }, 800);
 
     try {
-      const response = await fetch('/api/scan', {
-        method: 'POST',
-        body: formData
-      });
+      let data;
+      if (githubUrl) {
+        const response = await fetch('/api/scan-github', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: githubUrl })
+        });
+        if (!response.ok) {
+          const err = await response.json();
+          throw new Error(err.error || 'GitHub scan failed');
+        }
+        data = await response.json();
+      } else {
+        const formData = new FormData();
+        selectedItems.forEach(file => {
+          formData.append('files', file);
+        });
+        const response = await fetch('/api/scan', {
+          method: 'POST',
+          body: formData
+        });
+        if (!response.ok) throw new Error('Network response was not ok');
+        data = await response.json();
+      }
 
-      if (!response.ok) throw new Error('Network response was not ok');
-
-      const data = await response.json();
       console.log('Backend Response Received:', data);
 
       // Transform backend response into ScanResult structure
       const result: ScanResult = {
         id: `scan-${Date.now()}`,
-        projectName: selectedItems[0]?.name.split('.')[0] || 'Untitled Project',
+        projectName: data.repoInfo ? data.repoInfo.name : (selectedItems[0]?.name.split('.')[0] || 'Untitled Project'),
         timestamp: new Date().toLocaleString(),
         vulnerabilities: {
-          critical: [...data.internal, ...data.external, ...data.thirdParty].filter(d => d.riskLevel === 'Critical').length,
-          high: [...data.internal, ...data.external, ...data.thirdParty].filter(d => d.riskLevel === 'High').length,
-          medium: [...data.internal, ...data.external, ...data.thirdParty].filter(d => d.riskLevel === 'Medium').length,
-          low: [...data.internal, ...data.external, ...data.thirdParty].filter(d => d.riskLevel === 'Low').length,
+          critical: [...data.internal, ...data.external, ...data.thirdParty].filter(d => d.risk === 'Critical').length + 
+                    (data.codeErrors?.filter((f: any) => f.severity === 'Critical').length || 0),
+          high: [...data.internal, ...data.external, ...data.thirdParty].filter(d => d.risk === 'High').length +
+                (data.codeErrors?.filter((f: any) => f.severity === 'High').length || 0),
+          medium: [...data.internal, ...data.external, ...data.thirdParty].filter(d => d.risk === 'Medium').length,
+          low: [...data.internal, ...data.external, ...data.thirdParty].filter(d => d.risk === 'Low').length,
         },
         dependencies: [
-          ...data.internal.map((d: any) => ({ ...d, id: Math.random().toString(36).substr(2, 9), type: 'internal', license: 'Proprietary', risk: d.riskLevel, filePath: d.file })),
-          ...data.external.map((d: any) => ({ ...d, id: Math.random().toString(36).substr(2, 9), type: 'external', license: 'MIT', risk: d.riskLevel, filePath: d.file })),
-          ...data.thirdParty.map((d: any) => ({ ...d, id: Math.random().toString(36).substr(2, 9), type: 'third-party', license: 'Apache-2.0', risk: d.riskLevel, filePath: d.file })),
+          ...data.internal.map((d: any) => ({ ...d, type: 'internal' })),
+          ...data.external.map((d: any) => ({ ...d, type: 'external' })),
+          ...data.thirdParty.map((d: any) => ({ ...d, type: 'third-party' })),
         ],
-        internal: data.internal.map((d: any) => ({ ...d, id: Math.random().toString(36).substr(2, 9), type: 'internal', license: 'Proprietary', risk: d.riskLevel, filePath: d.file })),
-        external: data.external.map((d: any) => ({ ...d, id: Math.random().toString(36).substr(2, 9), type: 'external', license: 'MIT', risk: d.riskLevel, filePath: d.file })),
-        thirdParty: data.thirdParty.map((d: any) => ({ ...d, id: Math.random().toString(36).substr(2, 9), type: 'third-party', license: 'Apache-2.0', risk: d.riskLevel, filePath: d.file })),
-        codeErrors: [], // Backend could be expanded to return these too
+        internal: data.internal.map((d: any) => ({ ...d, type: 'internal' })),
+        external: data.external.map((d: any) => ({ ...d, type: 'external' })),
+        thirdParty: data.thirdParty.map((d: any) => ({ ...d, type: 'third-party' })),
+        codeErrors: data.codeErrors || [],
+        aiSuggestions: data.aiSuggestions || [],
+        licenseWarnings: data.licenseWarnings || [],
+        dependencyGraph: data.dependencyGraph || { id: 'root', name: 'Project', version: '1.0.0', type: 'internal', children: [] },
+        riskPredictions: data.riskPredictions || [],
         metadata: {
-          engine: 'V8.0 Deterministic Node',
-          fileCount: selectedItems.length,
-          detectedStack: 'Node.js / React',
-          totalSize: `${(selectedItems.reduce((acc, f) => acc + f.size, 0) / 1024).toFixed(2)} KB`
-        }
+          engine: 'V9.0 Advanced Intelligence',
+          fileCount: data.internal.length + data.external.length + data.thirdParty.length,
+          detectedStack: data.repoInfo ? `GitHub: ${data.repoInfo.owner}/${data.repoInfo.name}` : 'Hybrid Analysis',
+          totalSize: data.repoInfo ? 'Remote Repository' : `${(selectedItems.reduce((acc, f) => acc + f.size, 0) / 1024).toFixed(2)} KB`,
+          repoInfo: data.repoInfo
+        },
+        securityScore: data.securityScore || 0
       };
 
       console.log('Mapped ScanResult:', result);
@@ -101,14 +140,14 @@ const Scan: React.FC<ScanProps> = ({ onScanComplete, addToast, t }) => {
         onScanComplete(result, selectedItems);
       }, 500);
 
-    } catch (err) {
+    } catch (err: any) {
       console.error('Scan Error:', err);
       clearInterval(interval);
       setIsScanning(false);
       setDbStatus('IDLE');
       addToast({
         title: 'Audit Failed',
-        message: 'A system error occurred during deterministic parsing.',
+        message: err.message || 'A system error occurred during deterministic parsing.',
         type: 'error'
       });
     }
@@ -135,22 +174,49 @@ const Scan: React.FC<ScanProps> = ({ onScanComplete, addToast, t }) => {
           animate={{ opacity: 1, x: 0 }}
           className="glass p-10 rounded-[3rem] space-y-8 flex flex-col justify-center min-h-[500px] shadow-2xl"
         >
-          <div className="grid grid-cols-3 gap-4">
-            <UploadButton icon={FileText} label="Files" onClick={() => fileInputRef.current?.click()} />
-            <UploadButton icon={Folder} label="Folders" onClick={() => folderInputRef.current?.click()} />
-            <UploadButton icon={FileArchive} label="ZIPs" onClick={() => zipInputRef.current?.click()} />
+          <div className="space-y-6">
+            <div className="grid grid-cols-3 gap-4">
+              <UploadButton icon={FileText} label="Files" onClick={() => fileInputRef.current?.click()} />
+              <UploadButton icon={Folder} label="Folders" onClick={() => folderInputRef.current?.click()} />
+              <UploadButton icon={FileArchive} label="ZIPs" onClick={() => zipInputRef.current?.click()} />
+            </div>
+
+            <div className="relative">
+              <div className="absolute left-4 top-1/2 -translate-y-1/2 flex items-center gap-2 opacity-40">
+                <Github size={16} />
+                <div className="w-[1px] h-4 bg-[var(--text-muted)]" />
+              </div>
+              <input 
+                type="text"
+                value={githubUrl}
+                onChange={(e) => {
+                  setGithubUrl(e.target.value);
+                  if (e.target.value) setSelectedItems([]);
+                }}
+                placeholder="Paste GitHub Repository URL..."
+                className="w-full h-14 bg-black/20 border border-[var(--border)] rounded-2xl pl-14 pr-4 text-xs font-mono outline-none focus:border-emerald-500 transition-all"
+              />
+            </div>
           </div>
 
           <input type="file" ref={fileInputRef} className="hidden" multiple onChange={handleSelection} />
           <input type="file" ref={folderInputRef} className="hidden" {...({ webkitdirectory: "" } as any)} onChange={handleSelection} />
           <input type="file" ref={zipInputRef} className="hidden" accept=".zip,.rar,.tar" onChange={handleSelection} />
 
-          <div className={`w-full h-80 border-2 border-dashed rounded-[3rem] transition-all flex flex-col items-center justify-center p-10 text-center relative overflow-hidden ${selectedItems.length > 0 ? 'border-emerald-500 bg-emerald-500/5' : 'border-[var(--border)] hover:border-emerald-500/30'}`}>
+          <div className={`w-full h-64 border-2 border-dashed rounded-[3rem] transition-all flex flex-col items-center justify-center p-10 text-center relative overflow-hidden ${selectedItems.length > 0 || githubUrl ? 'border-emerald-500 bg-emerald-500/5' : 'border-[var(--border)] hover:border-emerald-500/30'}`}>
             {isScanning && <div className="scan-line" />}
-            {selectedItems.length === 0 ? (
+            {selectedItems.length === 0 && !githubUrl ? (
               <div className="opacity-40">
                 <Database size={48} className="mx-auto mb-4 text-[var(--text-main)]" />
                 <p className="text-sm font-bold uppercase tracking-widest text-[var(--text-main)]">No Payload Detected</p>
+              </div>
+            ) : githubUrl ? (
+              <div className="space-y-4">
+                <div className="p-4 bg-emerald-500/10 rounded-2xl border border-emerald-500/20 inline-block">
+                  <Github size={32} className="text-emerald-500" />
+                </div>
+                <p className="text-xs font-mono text-emerald-500 font-bold truncate max-w-[300px]">{githubUrl}</p>
+                <p className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">Remote Repository Staged</p>
               </div>
             ) : (
               <div className="w-full space-y-6">
@@ -158,14 +224,14 @@ const Scan: React.FC<ScanProps> = ({ onScanComplete, addToast, t }) => {
                   <span className="text-xs font-black uppercase text-emerald-500 tracking-widest">{selectedItems.length} {t('nodes_staged')}</span>
                   <button onClick={() => setSelectedItems([])} className="text-rose-500 hover:underline text-[10px] font-bold uppercase tracking-widest">Clear All</button>
                 </div>
-                <div className="max-h-40 overflow-y-auto pr-2 space-y-2">
-                  {selectedItems.slice(0, 5).map((f, i) => (
+                <div className="max-h-32 overflow-y-auto pr-2 space-y-2">
+                  {selectedItems.slice(0, 3).map((f, i) => (
                     <div key={i} className="flex items-center justify-between text-[10px] font-mono p-3 bg-[var(--bg-body)] rounded-xl border border-[var(--border)] text-[var(--text-main)]">
                       <span className="truncate max-w-[200px]">{f.name}</span>
                       <span className="opacity-40">{(f.size / 1024).toFixed(1)}KB</span>
                     </div>
                   ))}
-                  {selectedItems.length > 5 && <div className="text-[9px] font-bold text-[var(--text-muted)] italic">+{selectedItems.length - 5} more files...</div>}
+                  {selectedItems.length > 3 && <div className="text-[9px] font-bold text-[var(--text-muted)] italic">+{selectedItems.length - 3} more files...</div>}
                 </div>
               </div>
             )}
@@ -173,7 +239,7 @@ const Scan: React.FC<ScanProps> = ({ onScanComplete, addToast, t }) => {
 
           <button
             onClick={startScan}
-            disabled={isScanning || selectedItems.length === 0}
+            disabled={isScanning || (selectedItems.length === 0 && !githubUrl)}
             className="btn-primary w-full h-16 flex items-center justify-center gap-4"
           >
             {isScanning ? <Loader2 className="animate-spin" /> : <ShieldCheck />}
@@ -196,7 +262,7 @@ const Scan: React.FC<ScanProps> = ({ onScanComplete, addToast, t }) => {
                 </div>
               </div>
               <div className="space-y-4">
-                <p className="text-sm font-bold uppercase tracking-[0.4em] text-emerald-500">{t('analyzing_streams')}</p>
+                <p className="text-sm font-bold uppercase tracking-[0.4em] text-emerald-500">{status}</p>
                 <p className="text-[10px] text-[var(--text-muted)] font-mono animate-pulse">APPLYING DETERMINISTIC RULES...</p>
               </div>
             </div>

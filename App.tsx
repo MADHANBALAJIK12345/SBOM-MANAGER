@@ -4,6 +4,7 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Scan from './pages/Scan';
 import SbomResult from './pages/SbomResult';
+import Compare from './pages/Compare';
 import Notifications from './pages/Notifications';
 import Profile from './pages/Profile';
 import Contact from './pages/Contact';
@@ -44,6 +45,22 @@ const App: React.FC = () => {
 
   const [notifications, setNotifications] = useState<Notification[]>(mockNotifications);
   const [latestScan, setLatestScan] = useState<ScanResult | null>(null);
+  const [history, setHistory] = useState<ScanResult[]>([]);
+
+  useEffect(() => {
+    const fetchHistory = async () => {
+      try {
+        const response = await fetch('/api/history');
+        if (response.ok) {
+          const data = await response.json();
+          setHistory(data);
+        }
+      } catch (err) {
+        console.error('Failed to fetch history:', err);
+      }
+    };
+    fetchHistory();
+  }, [latestScan]);
 
   useEffect(() => {
     const syncSession = async () => {
@@ -198,9 +215,10 @@ const App: React.FC = () => {
               transition={{ duration: 0.3, ease: "easeOut" }}
               className="h-full"
             >
-              {activeTab === 'dashboard' && <Dashboard latestScan={latestScan} userEmail={user?.email} onNavigate={setActiveTab} isDark={theme === 'dark'} t={t} />}
+              {activeTab === 'dashboard' && <Dashboard latestScan={latestScan} history={history} userEmail={user?.email} onNavigate={setActiveTab} isDark={theme === 'dark'} t={t} />}
               {activeTab === 'scan' && <Scan onScanComplete={onScanComplete} addToast={addToast} t={t} />}
               {activeTab === 'sbom' && <SbomResult scanResult={latestScan} user={user} t={t} />}
+              {activeTab === 'compare' && <Compare history={history} />}
               {activeTab === 'notifications' && <Notifications notifications={notifications} setNotifications={setNotifications} t={t} />}
               {activeTab === 'profile' && <Profile user={user} setUser={setUser} t={t} />}
               {activeTab === 'contact' && <Contact t={t} user={user} addToast={addToast} />}

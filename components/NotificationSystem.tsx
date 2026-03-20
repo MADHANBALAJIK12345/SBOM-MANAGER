@@ -34,7 +34,7 @@ const ToastItem: React.FC<{ toast: Toast; onRemove: () => void }> = ({ toast, on
   }, [onRemove]);
 
   useEffect(() => {
-    const hideTime = 4000;
+    const hideTime = 3000;
     const timer = window.setTimeout(triggerDismiss, hideTime);
     
     return () => {
@@ -74,7 +74,7 @@ const ToastItem: React.FC<{ toast: Toast; onRemove: () => void }> = ({ toast, on
       <div className="absolute bottom-0 left-0 h-1 bg-white/5 w-full">
         <div 
           className={`h-full ${config.color.replace('text', 'bg')} animate-progress-bar`} 
-          style={{ animationDuration: '4s' }}
+          style={{ animationDuration: '3s' }}
         />
       </div>
       

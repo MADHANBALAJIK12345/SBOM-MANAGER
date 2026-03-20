@@ -196,16 +196,35 @@ export const analyzeFiles = async (files: File[]): Promise<ScanResult> => {
     low: dependencies.filter(d => d.risk === 'Low').length + codeErrors.filter(e => e.severity === 'Low').length
   };
 
+  // Security Score Calculation
+  let securityScore = 100;
+  dependencies.forEach(dep => {
+    if (dep.risk === 'Critical') securityScore -= 30;
+    else if (dep.risk === 'High') securityScore -= 20;
+    else if (dep.risk === 'Medium') securityScore -= 10;
+    else if (dep.risk === 'Low') securityScore -= 5;
+  });
+  codeErrors.forEach(err => {
+    if (err.severity === 'Critical') securityScore -= 30;
+    else if (err.severity === 'High') securityScore -= 20;
+  });
+  securityScore = Math.max(0, securityScore);
+
   return {
     id: `audit-${getStringHash(projectName + timestamp)}`,
     projectName,
     timestamp,
     vulnerabilities,
+    securityScore,
     dependencies,
     internal: dependencies.filter(d => d.type === 'internal'),
     external: dependencies.filter(d => d.type === 'external'),
     thirdParty: dependencies.filter(d => d.type === 'third-party'),
     codeErrors,
+    aiSuggestions: [],
+    licenseWarnings: [],
+    dependencyGraph: { id: 'root', name: projectName, version: '1.0.0', type: 'internal' },
+    riskPredictions: [],
     metadata: {
       engine: 'SBOM_DETERMINISTIC_V7',
       fileCount: files.length,

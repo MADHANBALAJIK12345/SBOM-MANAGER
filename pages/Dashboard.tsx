@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Package, ShieldAlert, Library, Box, Zap, Bell, ShieldCheck, Activity, Globe, Cpu, Server, History, ChevronRight, Database } from 'lucide-react';
+import { Package, ShieldAlert, Library, Box, Zap, Bell, ShieldCheck, Activity, Globe, Cpu, Server, History, ChevronRight, Database, CheckCircle } from 'lucide-react';
 import { ScanResult } from '../types';
 import { storageService } from '../services/storageService';
 
@@ -72,6 +72,16 @@ const Dashboard: React.FC<DashboardProps> = ({ latestScan, userEmail, onNavigate
     external: latestScan?.external?.length || 0,
     thirdParty: latestScan?.thirdParty?.length || 0,
     highRisk: latestScan?.vulnerabilities.critical || 0,
+    securityScore: latestScan?.securityScore || 100,
+    aiSuggestions: latestScan?.aiSuggestions?.length || 0,
+    licenseWarnings: latestScan?.licenseWarnings?.length || 0,
+  };
+
+  const getScoreColor = (score: number) => {
+    if (score >= 80) return 'text-emerald-500';
+    if (score >= 60) return 'text-amber-500';
+    if (score >= 40) return 'text-orange-500';
+    return 'text-rose-500';
   };
 
   const gridColor = isDark ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.05)';
@@ -148,12 +158,11 @@ const Dashboard: React.FC<DashboardProps> = ({ latestScan, userEmail, onNavigate
         variants={containerVariants}
         initial="hidden"
         animate="show"
-        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6"
+        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"
       >
-        <StatCard icon={Box} label={t('active_audits')} value={stats.totalProjects} color="text-[var(--text-main)]" variants={itemVariants} />
-        <StatCard icon={Cpu} label={t('internal_nodes')} value={stats.internal} color="text-emerald-500" variants={itemVariants} />
-        <StatCard icon={Package} label={t('external_libs')} value={stats.external} color="text-blue-500" variants={itemVariants} />
-        <StatCard icon={Library} label={t('third_party')} value={stats.thirdParty} color="text-amber-500" variants={itemVariants} />
+        <StatCard icon={ShieldCheck} label="Security Score" value={stats.securityScore} color={getScoreColor(stats.securityScore)} variants={itemVariants} isScore />
+        <StatCard icon={Zap} label="AI Suggestions" value={stats.aiSuggestions} color="text-amber-500" variants={itemVariants} highlight={stats.aiSuggestions > 0} onClick={() => onNavigate('sbom')} />
+        <StatCard icon={CheckCircle} label="License Warnings" value={stats.licenseWarnings} color="text-rose-500" variants={itemVariants} highlight={stats.licenseWarnings > 0} onClick={() => onNavigate('sbom')} />
         <StatCard icon={ShieldAlert} label={t('threat_index')} value={stats.highRisk} color="text-rose-500" highlight onClick={() => onNavigate('sbom')} variants={itemVariants} />
       </motion.div>
 
@@ -282,23 +291,41 @@ const Dashboard: React.FC<DashboardProps> = ({ latestScan, userEmail, onNavigate
   );
 };
 
-const StatCard: React.FC<{ icon: any; label: string; value: number; color: string; highlight?: boolean; onClick?: () => void; variants?: any }> = ({ icon: Icon, label, value, color, highlight, onClick, variants }) => (
+const StatCard: React.FC<{ icon: any; label: string; value: number; color: string; highlight?: boolean; onClick?: () => void; variants?: any; isScore?: boolean }> = ({ icon: Icon, label, value, color, highlight, onClick, variants, isScore }) => (
   <motion.div 
     variants={variants}
     onClick={onClick}
-    className={`p-10 card-bento ${highlight ? 'border-rose-500/30 ring-1 ring-rose-500/10 shadow-rose-500/5 shadow-2xl' : ''} ${onClick ? 'cursor-pointer' : ''}`}
+    className={`card-bento flex flex-col items-center justify-center p-5 ${highlight ? 'border-rose-500/30 ring-1 ring-rose-500/10 shadow-rose-500/5 shadow-2xl' : ''} ${onClick ? 'cursor-pointer' : ''}`}
   >
-    <div className="flex justify-between items-center relative z-10">
-      <div className={`p-4 rounded-2xl ${highlight ? 'bg-rose-500/10' : 'bg-emerald-500/5 border border-emerald-500/10'}`}>
-        <Icon className={`w-8 h-8 ${color} group-hover:rotate-12 transition-transform`} />
+    <div className={`mb-[10px] p-4 rounded-2xl ${highlight ? 'bg-rose-500/10' : 'bg-emerald-500/5 border border-emerald-500/10'} relative z-10`}>
+      <Icon className={`w-8 h-8 ${color} group-hover:rotate-12 transition-transform`} />
+    </div>
+    
+    <div className="flex flex-col items-center relative z-10 mb-[6px]">
+      <div className="flex items-baseline">
+        <span className={`text-[36px] font-bold font-mono tracking-tighter ${color}`}>
+          {value.toString().padStart(2, '0')}
+        </span>
+        {isScore && <span className="text-[14px] font-bold opacity-20 ml-1">/100</span>}
       </div>
-      <span className={`text-5xl font-black font-mono tracking-tighter ${color}`}>{value.toString().padStart(2, '0')}</span>
     </div>
-    <div className="mt-8 relative z-10">
-      <p className="text-[10px] font-black text-[var(--text-muted)] uppercase tracking-[0.3em]">{label}</p>
+
+    <div className="relative z-10">
+      <p className="text-[12px] font-black text-[var(--text-muted)] uppercase tracking-[2px] text-center">{label}</p>
     </div>
+
     {highlight && (
       <div className="absolute -right-8 -bottom-8 w-32 h-32 bg-rose-500/5 blur-[50px] pointer-events-none group-hover:bg-rose-500/10 transition-all" />
+    )}
+    
+    {isScore && (
+      <div className="mt-4 w-full h-1 bg-black/10 rounded-full overflow-hidden max-w-[100px]">
+        <motion.div 
+          initial={{ width: 0 }}
+          animate={{ width: `${value}%` }}
+          className={`h-full ${color.replace('text', 'bg')}`}
+        />
+      </div>
     )}
   </motion.div>
 );

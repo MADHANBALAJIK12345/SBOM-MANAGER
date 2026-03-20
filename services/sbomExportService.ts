@@ -23,7 +23,13 @@ export const transformToCycloneDX = (scan: ScanResult) => {
         name: scan.projectName,
         type: "application",
         bomRef: "root-app"
-      }
+      },
+      properties: [
+        {
+          name: "securityScore",
+          value: scan.securityScore.toString()
+        }
+      ]
     },
     components: scan.dependencies.map(dep => ({
       name: dep.name,
@@ -57,6 +63,7 @@ export const transformToSPDX = (scan: ScanResult) => {
       creators: ["Tool: SBOM Manager Pro v6.0"],
       created: new Date().toISOString()
     },
+    comment: `Security Score: ${scan.securityScore}/100`,
     packages: scan.dependencies.map((dep, index) => ({
       name: dep.name,
       SPDXID: `SPDXRef-Package-${index}`,
@@ -98,7 +105,8 @@ export const transformToALS = (scan: ScanResult) => {
     project: {
       name: scan.projectName,
       totalComponents: scan.dependencies.length,
-      highRiskCount: scan.vulnerabilities.critical + scan.vulnerabilities.high
+      highRiskCount: scan.vulnerabilities.critical + scan.vulnerabilities.high,
+      securityScore: scan.securityScore
     },
     authoritativeLicenseInventory: scan.dependencies.map(dep => ({
       component: dep.name,

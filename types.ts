@@ -49,6 +49,56 @@ export interface Project {
   dependencyCount: number;
 }
 
+export interface AISuggestion {
+  id: string;
+  dependencyId: string;
+  dependencyName: string;
+  currentVersion: string;
+  suggestedVersion: string;
+  action: 'update' | 'replace' | 'remove';
+  reason: string;
+  severity: RiskLevel;
+  alternative?: string;
+}
+
+export interface LicenseWarning {
+  id: string;
+  dependencyName: string;
+  license: string;
+  severity: 'High' | 'Medium' | 'Low';
+  message: string;
+}
+
+export interface DependencyNode {
+  id: string;
+  name: string;
+  version: string;
+  type: 'internal' | 'external' | 'third-party';
+  children?: DependencyNode[];
+}
+
+export interface RiskPrediction {
+  dependencyName: string;
+  updateFrequency: 'High' | 'Medium' | 'Low';
+  predictionScore: number;
+  message: string;
+}
+
+export interface ScanComparison {
+  scan1Id: string;
+  scan2Id: string;
+  addedDependencies: Dependency[];
+  removedDependencies: Dependency[];
+  changedVersions: { name: string; oldVersion: string; newVersion: string }[];
+  vulnerabilityDiff: {
+    critical: number;
+    high: number;
+    medium: number;
+    low: number;
+  };
+  scoreDiff: number;
+}
+
 export interface ScanResult {
   id: string;
   projectName: string;
@@ -64,12 +114,22 @@ export interface ScanResult {
   external: Dependency[];
   thirdParty: Dependency[];
   codeErrors: CodeError[];
+  aiSuggestions: AISuggestion[];
+  licenseWarnings: LicenseWarning[];
+  dependencyGraph: DependencyNode;
+  riskPredictions: RiskPrediction[];
   metadata: {
     engine: string;
     fileCount: number;
     detectedStack: string;
     totalSize?: string;
+    repoInfo?: {
+      name: string;
+      owner: string;
+      branch: string;
+    };
   };
+  securityScore: number;
 }
 
 export interface UserProfile {

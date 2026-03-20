@@ -33,12 +33,12 @@ const Login: React.FC<LoginProps> = ({ onLogin, t }) => {
     try {
       if (isAdminMode) {
         // Updated Admin Credentials
-        if (formData.email === 'madhan678@gmail.com' && formData.password === 'madhan@678') {
+        if (formData.email === 'madhan@gmail.com' && formData.password === 'madhansbom12') {
           onLogin({
             name: 'Madhan Admin',
-            username: 'madhan678',
-            email: 'admin@sbom.pro',
-            phone: '+1 800 ADMIN',
+            username: 'madhan_admin',
+            email: 'madhan@gmail.com',
+            phone: '+91 98765 43210',
             role: 'admin',
             about: 'Root level access. System Oversight.'
           });

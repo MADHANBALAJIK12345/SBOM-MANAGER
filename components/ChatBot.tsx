@@ -16,7 +16,7 @@ interface ChatBotProps {
 const ChatBot: React.FC<ChatBotProps> = ({ isDarkTheme }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
-    { role: 'bot', text: 'TERMINAL_READY. I am your SBOM Intelligence Liaison. Ask me about inventory risks or vulnerability resolution.' }
+    { role: 'bot', text: 'TERMINAL_READY. I am MadhanBalaji AI Assistant, your SBOM Intelligence Liaison. Ask me about inventory risks or vulnerability resolution.' }
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -106,7 +106,7 @@ const ChatBot: React.FC<ChatBotProps> = ({ isDarkTheme }) => {
   };
 
   return (
-    <div className="fixed bottom-8 right-8 z-[9999] flex flex-col items-end">
+    <div className="fixed bottom-4 right-4 sm:bottom-8 sm:right-8 z-[9999] flex flex-col items-end pointer-events-none">
       <AnimatePresence>
         {isOpen && (
           <motion.div 
@@ -115,7 +115,7 @@ const ChatBot: React.FC<ChatBotProps> = ({ isDarkTheme }) => {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
             transition={{ duration: 0.2, ease: "easeOut" }}
-            className={`w-[420px] h-[640px] border rounded-[3rem] shadow-2xl flex flex-col overflow-hidden mb-6 backdrop-blur-3xl ${
+            className={`w-[calc(100vw-32px)] sm:w-[380px] h-[500px] max-h-[70vh] sm:max-h-[80vh] border rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden mb-4 backdrop-blur-3xl pointer-events-auto ${
               isDarkTheme ? 'bg-slate-950/95 border-white/10 ring-1 ring-white/10' : 'bg-white/98 border-slate-200 shadow-slate-200/50'
             }`}
           >
@@ -126,7 +126,7 @@ const ChatBot: React.FC<ChatBotProps> = ({ isDarkTheme }) => {
                 <BrainCircuit className="text-emerald-500" size={20} />
               </div>
               <div>
-                <h3 className="text-sm font-black uppercase tracking-widest italic">SBOM_AI_LIAISON</h3>
+                <h3 className="text-sm font-black uppercase tracking-widest italic">MadhanBalaji AI Assistant</h3>
                 <div className="flex items-center gap-2 mt-1">
                   <div className={`w-1.5 h-1.5 rounded-full ${isLoading ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'}`} />
                   <span className="text-[9px] font-bold opacity-40 uppercase tracking-widest">
@@ -230,7 +230,7 @@ const ChatBot: React.FC<ChatBotProps> = ({ isDarkTheme }) => {
       <button
         ref={triggerRef}
         onClick={() => setIsOpen(!isOpen)}
-        className={`w-20 h-20 rounded-full flex items-center justify-center transition-all shadow-2xl group relative ${
+        className={`w-16 h-16 sm:w-20 sm:h-20 rounded-full flex items-center justify-center transition-all shadow-2xl group relative pointer-events-auto ${
           isDarkTheme ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-500/20' : 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-500/20'
         } ${isOpen ? 'rotate-90' : 'hover:scale-105'}`}
         aria-label={isOpen ? "Close chatbot" : "Open chatbot"}
