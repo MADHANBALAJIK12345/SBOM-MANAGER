@@ -1,3 +1,4 @@
+import fs from 'fs';
 import express from 'express';
 import multer from 'multer';
 import cors from 'cors';
@@ -6,8 +7,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import axios from 'axios';
 import AdmZip from 'adm-zip';
-import { VULNERABILITY_DATASET } from './vulnerabilityDataset.js';
-import { ScanResult, RiskLevel, ScanComparison, Dependency } from './types.js';
+import { VULNERABILITY_DATASET } from './src/vulnerabilityDataset.js';
+import { ScanResult, RiskLevel, ScanComparison, Dependency } from './src/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,8 +19,44 @@ const port = 3000;
 app.use(cors());
 app.use(express.json());
 
-// In-memory storage for scan history
-const scanHistory: ScanResult[] = [];
+const SCANS_FILE = path.join(__dirname, 'scans.json');
+const FEEDBACK_FILE = path.join(__dirname, 'feedback.json');
+
+// Initialize history from files if they exist
+let scanHistory: ScanResult[] = [];
+let feedbackHistory: any[] = [];
+
+try {
+  if (fs.existsSync(SCANS_FILE)) {
+    const data = fs.readFileSync(SCANS_FILE, 'utf8');
+    scanHistory = JSON.parse(data);
+    console.log(`Loaded ${scanHistory.length} scans from persistence.`);
+  }
+  if (fs.existsSync(FEEDBACK_FILE)) {
+    const data = fs.readFileSync(FEEDBACK_FILE, 'utf8');
+    feedbackHistory = JSON.parse(data);
+    console.log(`Loaded ${feedbackHistory.length} feedback entries from persistence.`);
+  }
+} catch (e) {
+  console.error('Error loading persistent data:', e);
+}
+
+// Helper to save data
+const saveScans = () => {
+  try {
+    fs.writeFileSync(SCANS_FILE, JSON.stringify(scanHistory, null, 2));
+  } catch (e) {
+    console.error('Error saving scans:', e);
+  }
+};
+
+const saveFeedback = () => {
+  try {
+    fs.writeFileSync(FEEDBACK_FILE, JSON.stringify(feedbackHistory, null, 2));
+  } catch (e) {
+    console.error('Error saving feedback:', e);
+  }
+};
 
 // Configure multer for file uploads
 const storage = multer.memoryStorage();
@@ -98,13 +135,11 @@ function scanFiles(files: ScanFile[]): ScanResult {
     return 'Unknown';
   };
 
+  // 1. Manifest Analysis (Third-Party) - Process these FIRST
   files.forEach(file => {
     const fileName = file.name;
     const content = file.content;
-    
-    console.log(`Processing file: ${fileName}`);
 
-    // 1. Manifest Analysis (Third-Party)
     if (fileName.endsWith('package.json')) {
       try {
         const pkg = JSON.parse(content);
@@ -174,30 +209,43 @@ function scanFiles(files: ScanFile[]): ScanResult {
         }
       });
     }
+  });
+
+  // 2. Code Analysis (Internal & External)
+  files.forEach(file => {
+    const fileName = file.name;
+    const content = file.content;
     
-    // 2. Code Analysis (Internal & External)
+    // Skip manifest files already processed
+    if (fileName.endsWith('package.json') || fileName.endsWith('requirements.txt')) return;
+
     const isSourceFile = fileName.endsWith('.js') || fileName.endsWith('.ts') || fileName.endsWith('.tsx') || fileName.endsWith('.py') || fileName.endsWith('.java');
     
     if (isSourceFile) {
       // External Imports Detection
       let importRegex;
       if (fileName.endsWith('.py')) {
-        importRegex = /(?:import|from)\s+([a-zA-Z0-9_]+)/g;
+        importRegex = /(?:import|from)\s+([a-zA-Z0-9_.]+)/g;
       } else if (fileName.endsWith('.java')) {
         importRegex = /import\s+([a-zA-Z0-9_.]+);/g;
       } else {
-        importRegex = /(?:import|from)\s+['"]([^'"]+)['"]|require\(['"]([^'"]+)['"]\)/g;
+        // Improved JS/TS regex to catch more import patterns
+        importRegex = /(?:import|from)\s+['"]([^'"]+)['"]|require\(['"]([^'"]+)['"]\)|import\((?:['"]([^'"]+)['"])\)/g;
       }
 
       let match;
       while ((match = importRegex.exec(content)) !== null) {
-        let imp = match[1] || match[2];
+        let imp = match[1] || match[2] || match[3];
         if (!imp) continue;
 
-        if (imp.includes('/')) imp = imp.split('/')[0];
-        if (imp.startsWith('@')) {
-          const parts = imp.split('/');
-          if (parts.length >= 2) imp = `${parts[0]}/${parts[1]}`;
+        // Clean up import path
+        if (imp.includes('/')) {
+          if (imp.startsWith('@')) {
+            const parts = imp.split('/');
+            if (parts.length >= 2) imp = `${parts[0]}/${parts[1]}`;
+          } else {
+            imp = imp.split('/')[0];
+          }
         }
 
         if (imp && !imp.startsWith('.') && !imp.startsWith('/')) {
@@ -409,6 +457,7 @@ app.post('/api/scan', upload.array('files'), (req, res) => {
 
   const results = scanFiles(scanFilesInput);
   scanHistory.push(results);
+  saveScans();
   res.json(results);
 });
 
@@ -464,6 +513,7 @@ app.post('/api/scan-github', async (req, res) => {
     };
 
     scanHistory.push(results);
+    saveScans();
     res.json(results);
   } catch (error: any) {
     console.error('GitHub Scan Error:', error.message);
@@ -473,6 +523,31 @@ app.post('/api/scan-github', async (req, res) => {
 
 app.get('/api/history', (req, res) => {
   res.json(scanHistory);
+});
+
+app.post('/api/feedback', (req, res) => {
+  const feedback = {
+    id: `fb-${Date.now()}`,
+    timestamp: new Date().toISOString(),
+    ...req.body
+  };
+  feedbackHistory.push(feedback);
+  saveFeedback();
+  res.json({ success: true, feedback });
+});
+
+app.get('/api/admin/feedback', (req, res) => {
+  // Simple auth check could be added here
+  res.json(feedbackHistory);
+});
+
+app.post('/api/admin/login', (req, res) => {
+  const { email, password } = req.body;
+  if (email === 'madhan@gmail.com' && password === 'madhansbom12') {
+    res.json({ success: true, token: 'admin-token-123' });
+  } else {
+    res.status(401).json({ success: false, error: 'Invalid credentials' });
+  }
 });
 
 app.get('/api/compare/:id1/:id2', (req, res) => {
